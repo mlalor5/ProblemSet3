@@ -7,10 +7,12 @@
 
 # Load relevant libraries
 library(plyr)
+library(doMC)
+library(abind) #abind combines multi-dim arrays
 
 ## 1) Make a three dimensional array with dim=c(20,5, 1000) and fill it with random data.
 
-array1 <- array(data=(rnorm(100*1000, mean=2)) , dim=c(20,5,1000))
+array1 <- array(data=(rnorm(100*1000, mean=0)) , dim=c(20,5,1000))
 #dim(array1) 20 x 5 x 1000
 ## 2) Make function to create a Y values that are a linear combination of X pplus normal error
 
@@ -18,11 +20,11 @@ array1 <- array(data=(rnorm(100*1000, mean=2)) , dim=c(20,5,1000))
 Beta <- matrix(c(1,2,0,4,0), ncol=1)
 
 #Function to create Y vals
-yfun <- function(x, Beta) {
+yfun <- function(x, Beta, Parallel=F) { #Add in Parallel option for Q #7
   .singley <- function(x, Beta) { #Function to make a single y value
     x%*%Beta + rnorm(1) # 1x5 * 5x1 
   }
-  yval <- t(aaply(.data=x, .margins=3, .fun=.singley, Beta)) #for entire array
+  yval <- t(aaply(.data=x, .margins=3, .fun=.singley, Beta, .parallel=Parallel)) #for entire array
   return(yval) #return transpose so requested dimensions (below)
 }
 
@@ -31,14 +33,12 @@ yval <- yfun(array1,Beta)
 #dim(yval) #output is 20 x 1000
 
 ## 3) Run 1,000 regressions across all of this simulated data. 
-#output a 1000 by 6 matrix of estimated regression coefficients.
 
 #combine into one array:
-library(abind) #abind combines multi-dim arrays
 simdata <- abind(array1, yval, along=2)
 dim(simdata)
 data <- simdata
-regfun <- function(data) { #input of 3-d array where 2nd dim x1,...,xn,y
+regfun <- function(data, Parallel=F) { #input of 3-d array where 2nd dim x1,...,xn,y
   
   .extract <- function(data) { #Function to get beta estimates
     dims<- dim(data) # 2nd dim numeric will be different variables
@@ -47,14 +47,14 @@ regfun <- function(data) { #input of 3-d array where 2nd dim x1,...,xn,y
     datalm <- lm(y~x)
     return(as.numeric(datalm$coefficients)) #6 num, otherwise would also get names like intercept, etc
   }
-  output <- aaply(.data=data, .margins=3, .fun=.extract)
+  output <- aaply(.data=data, .margins=3, .fun=.extract, .parallel=Parallel)
   return(as.matrix(output))
 }
 
-#try out function to run regressions
+#output a 1000 by 6 matrix of estimated regression coefficients.
   test <- regfun(simdata) 
-  dim(test) # 1000 x 6
-  class(test) #matrix
+  #dim(test) # 1000 x 6
+  #class(test) #matrix
 
 ## 4) Create a density plot for each of the 6 coefficients 
  #What does this density represent? 
@@ -70,5 +70,57 @@ plot(density(test[,6]), main="Beta 5")
 # aka the proportion of regressions that found a given value e.g. 1 for a given coefficient e.g. intercept
 
 
+## 5) Alter your code so that you now collect t-statistics for all 1,000 regressions for all six coefficients
 
- 
+tstatsfun <- function(data, , Parallel=F) { #renamed for tstats
+  .extract <- function(data) { #Function to get t-estimates for betas
+    dims<- dim(data) # 2nd dim numeric will be different variables
+    y<- data[,dims[2]] # breaking up to y and x for readability
+    x<- data[,1:(dims[2]-1)]  
+    datalm <- lm(y~x) 
+    sum <- summary(datalm) #summary function to save coefficient t-vals
+    return(as.numeric(coef(sum)[, "t value"])) #6 num, otherwise would also get names like intercept, etc
+  }
+  toutput <- aaply(.data=data, .margins=3, .fun=.extract, .parallel=Parallel)
+  return(as.matrix(toutput))
+}
+
+#run altered function
+test <- tstatsfun(simdata) 
+dim(test) # 1000 x 6
+class(test) #matrix
+#summary(test) #note 4 and 6 have mean t-vals clearly < crit, makes sense since for those beta=0
+
+## 6) For the 1,000 regressions, calculate how many t-statistics are statistically “significant” (p≤.05) for each variable
+
+# calculate critical t-value for alpha=0.05 (2.1448 here)
+criticalval <- qt(0.975, 14)#0.975 for 2-sided t-test, 20 observations (n) with 5 parameters (k)  so 20-5 -1 = 14 df
+
+#Function to count number of crits
+critstats <- function(tstats, critval, , Parallel=F) { #input stats and critical t-value (assuming 2-sided)
+  #test crit for a given regression
+  .crit <- function(x, critval){ #checks a given row
+    critcoeff <- ifelse(critval >= abs(as.numeric(x)),0,1) # 0 if less than crit, 1 otherwise
+    return(critcoeff)
+  }
+  #Find for all regressions
+  critdata <- aaply(.data=tstats, .margins=1, .fun=.crit, critval=criticalval, .parallel=Parallel) #run by row
+  summary(critdata) #1s all down when summary(test) has a large enough min aka all but 4 and 6
+  #aaply wouldn't recognize sum as a function, so using standard apply
+  numbercrit <- apply (critdata, MARGIN=2, FUN=sum)#return how many t-stats were significiant for each coefficient
+  return(numbercrit) #return the number of crit for each coeff
+}
+
+#Run function
+(crits <- critstats(test, criticalval)) #Number of crits for each coefficient, notice beta=0 were ones with fewer crits (aka Type I Error)
+
+
+## 7) Re-run that code (facebook answer- any) in parallel. Using the system.time command, estimate how much time is saved
+system.time(regfun(simdata)) #one run user: 1.428, system: 0.000, elapsed: 1.423
+
+
+#Added in parallel option so can rerun in parallel
+registerDoMC(cores=4)
+system.time(regfun(simdata, Parallel=T)) #one run user: 2.820, system: 0.148, elapsed: 1.021
+
+#From system.time estimates it appears running in parallel saved  0.402 (1.423-1.021)
