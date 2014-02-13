@@ -7,6 +7,7 @@
 ### PART I: Sampling Distributions and p-values ###
 
 # Load relevant libraries
+rm(list=ls()) #after cleaning space
 library(plyr)
 library(doMC)
 library(abind) #abind combines multi-dim arrays
@@ -24,6 +25,16 @@ array1 <- array(data=(rnorm(100*1000, mean=0)) , dim=c(20,5,1000))
 Beta <- matrix(c(1,2,0,4,0), ncol=1)
 
 #Function to create Y vals
+
+#' This function creates Y vals given Betas and covariates
+#' @param x the 3-D array of x values
+#' @param Beta the true covariate values
+#' @param Parallel running in parallel, default False
+#' @return An array of y values with dimensions number of items in dataset by number of datasets
+#' 
+#' @author Margaret Lalor
+#' 
+
 yfun <- function(x, Beta, Parallel=F) { #Add in Parallel option for Q #7
   .singley <- function(x, Beta) { #Function to make a single y value
     x%*%Beta + rnorm(1) # 1x5 * 5x1 
@@ -43,6 +54,13 @@ yval <- yfun(array1,Beta)
 simdata <- abind(array1, yval, along=2)
 dim(simdata)
 data <- simdata
+#' This runs regressions across the simulated data
+#' @param data the 3-d array dim 1: n in dataset, dim 2: variables with last dependent, dim 3: number of datasets
+#' @param Parallel running in parallel, default False
+#' @return A 1000 by 6 matrix of estimated regression coefficients.
+#' 
+#' @author Margaret Lalor
+#' 
 regfun <- function(data, Parallel=F) { #input of 3-d array where 2nd dim x1,...,xn,y
   
   .extract <- function(data) { #Function to get beta estimates
@@ -64,12 +82,14 @@ regfun <- function(data, Parallel=F) { #input of 3-d array where 2nd dim x1,...,
 
 ## 4) Create a density plot for each of the 6 coefficients   ##
 
+par(mfrow = c(3,2))
 plot(density(test[,1]), main="Intercept") #Main describes particular coefficient
 plot(density(test[,2]), main="Beta 1")
 plot(density(test[,3]), main="Beta 2")
 plot(density(test[,4]), main="Beta 3")
 plot(density(test[,5]), main="Beta 4")
 plot(density(test[,6]), main="Beta 5")
+par(mfrow = c(1,1))
  
 #What does this density represent? 
 # These plots are the distributions of estimated betas from all regressions,
@@ -78,6 +98,13 @@ plot(density(test[,6]), main="Beta 5")
 
 ## 5) Alter your code so that you now collect t-statistics for all 1,000 regressions for all six coefficients ##
 
+#' This runs regressions across the simulated data, returning t-statistics for each coefficient for each run
+#' @param data the 3-d array dim 1: n in dataset, dim 2: variables with last dependent, dim 3: number of datasets
+#' @param Parallel running in parallel, default False
+#' @return A 1000 by 6 matrix of estimated regression coefficient t-statistics.
+#' 
+#' @author Margaret Lalor
+#'
 tstatsfun <- function(data, , Parallel=F) { #renamed for tstats
   .extract <- function(data) { #Function to get t-estimates for betas
     dims<- dim(data) # 2nd dim numeric will be different variables
@@ -104,6 +131,14 @@ class(test) #matrix
 criticalval <- qt(0.975, 14)#0.975 for 2-sided t-test, 20 observations (n) with 5 parameters (k)  so 20-5 -1 = 14 df
 
 #Function to count number of crits
+#' This counts the number of times a given covariate's t-value exceeds the given critical value for hypothesis testing
+#' @param tstats is a matrix with columns for covariates and row by dataset
+#' @param critval is the t-statistic at the critical value for a 2-tailed test (calculate on own)
+#' @param Parallel running in parallel, default False
+#' @return A 1000 by 6 matrix of estimated regression coefficients.
+#' 
+#' @author Margaret Lalor
+#'
 critstats <- function(tstats, critval, Parallel=F) { #input stats and critical t-value (assuming 2-sided)
   #test crit for a given regression
   .crit <- function(x, critval){ #checks a given row
@@ -115,12 +150,11 @@ critstats <- function(tstats, critval, Parallel=F) { #input stats and critical t
   summary(critdata) #1s all down when summary(test) has a large enough min aka all but 4 and 6
   #aaply wouldn't recognize sum as a function, so using standard apply
   numbercrit <- apply (critdata, MARGIN=2, FUN=sum)#return how many t-stats were significiant for each coefficient
-  return(numbercrit) #return the number of crit for each coeff
+  return(numbercrit) #return the number of crit for each coeff in a named vector
 }
 
 #Run function
 (crits <- critstats(test, criticalval)) #Number of crits for each coefficient, notice beta=0 were ones with fewer crits (aka # of regressions with Type I Error)
-
 
 ## 7) Re-run that code (facebook answer- any) in parallel. Using the system.time command, estimate how much time is saved
 system.time(regfun(simdata)) #one run user: 1.428, system: 0.000, elapsed: 1.423
@@ -184,6 +218,17 @@ m3pred <- predict(model3, newdata=testdata)
 
 
 ## 3) Alter function so user can specify stats and r optional ##
+#' This function calculates specified fit statistics for given data and models
+#' @param y is the vector of "true" observations
+#' @param p is the matrix of predicted observations (model by column)
+#' @param r is the vector of predictions from the naive model, default empty
+#' @param stats is a character vector that includes desired fit statistics (RMSE, MAD, RMSLE, MAPE, MEAPE, or MRAE)
+#' with default empty
+#' @return A matrix of calculated fit statistics, which varies in size depending on the number of models and requested fit statistics
+#' which will not return a matrix if no stats given, or MRAE requested but no r specified
+#' 
+#' @author Margaret Lalor
+#'
 
 predstats <- function(y, p, r="", stats="") { #r optional, specify stats to run
 
@@ -265,6 +310,14 @@ p <- as.matrix(cbind(m1pred,m2pred,m3pred))
 # class(run) #returns matrix
 
 # test function
+#' This tests the fit status function
+#' @param y is the vector of "true" observations
+#' @param p is the matrix of predicted observations (model by column)
+#' @param r is the vector of predictions from the naive model, default empty
+#' @return True if properly sized matrix returned, otherwise false, printing where problem occured
+#' 
+#' @author Margaret Lalor
+#'
 testfunction <- function(y,p,r) { #Will run with and without r, and various stats
   ok = TRUE
   
