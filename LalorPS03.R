@@ -3,6 +3,7 @@
 #Due Feb 13, 2013
 
 ## NO FOR LOOPS ##
+
 ### PART I: Sampling Distributions and p-values ###
 
 # Load relevant libraries
@@ -124,3 +125,99 @@ registerDoMC(cores=4)
 system.time(regfun(simdata, Parallel=T)) #one run user: 2.820, system: 0.148, elapsed: 1.021
 
 #From system.time estimates it appears running in parallel saved  0.402 (1.423-1.021)
+
+### Part II: Calculating Fit Statistics ###
+
+## 1) Using the Out of step dataset, randomly subset the data into two partitions. 
+incumb2 <- read.table(file="~/Documents/Spring_2014/Montgomery/PS03/incumbents2.txt", header=T, sep="\t")
+#summary(incumb2$voteshare) #125 NAs in dependent variable - remove these
+#dim(incumb2) #6687 x 20
+incumbentdata <- na.omit(incumb2) # dim(incumbentdata) now 3193 x 20
+index <- 1:dim(incumbentdata)[1] #1 is number of rows
+
+
+#set seed so results are reproduceable
+set.seed(25)
+testind <- sample(index, size = (length(index)/2))
+testdata <- incumbentdata[testind,] #3281 randomly subsetted
+trainingdata <- incumbentdata[-testind,]
+
+# Use one partition (“training set”) to build three statistical models 
+#with incumbent vote share as dependent variable
+library(BayesTree)
+library(e1071)
+summary(testdata)
+
+#Model 1 voteshare~ Party of President + Midterm Election + Incumbent Spending + Quality Challenger + Number Unemployed (logged)
+model1 <- lm( voteshare~incparty + midterm + incspend + chalquality + unemployed, data=trainingdata)
+summary(model1)
+
+#Model 2 - Model 1 + Incumbent Spending Squared + Vote Share of Presidential candidate (same party, last 2 elections)
+model2 <- lm( voteshare~incparty + midterm + incspend + incspend2 + presvote + chalquality + unemployed, data=trainingdata)
+summary(model2)
+
+#Model 3 - Kitchen Sink (all variables that are meaningful/not redundant)
+model3 <- lm(voteshare~.-x-difflog-congress, data=trainingdata)
+summary(model3)
+
+# Use these models to make “predictions” for the partition of the data you did
+#NOT use to fit the model. This is your “test” set.
+m1pred <- predict(model1, newdata=testdata)
+m2pred <- predict(model2, newdata=testdata)
+m3pred <- predict(model3, newdata=testdata)
+
+
+## 2) Write a function that takes as arguments 
+#(1) a vector of “true” observed outcomes (y), 
+#(2) avmatrix of predictions (P), and (3) a vector of naive forecasts (r). 
+#The matrix should be organized so that each column represents a single forecasting model and 
+#the rows correspond with each observation being predicted.
+#From Facebook: "The naive model should be whatever you want. A regression with just a constant, or just including one variable."
+
+#The function should output a matrix where each column corresponds with 
+# one of the above (PS03) fit statistics, and each row corresponds to a model.
+
+predstats <- function(y, p, r) {
+
+  #Pre-stat computing math
+  #absolute error e_i = |p_i - y_i|
+  abserror <- abs(p-cbind(y,y,y)) # technically don't need cbind, but reminder of dim
+  #absolute error percentage a_i =e_i / |y_i| * 100
+  abserrorpercent <- abserror/abs(y)*100
+  #baseline b_i = |r_i - y_i|
+  baseline <- abs(r-y)
+  class(start)
+  #Compute Stats  
+  #RMSE = sqrt( sum e^2/n)
+  RMSE <- sqrt(colSums(e^2)/length(y))
+  
+  #MAD = median(e)
+  MAD = aaply(e, .margins=2, .fun=median)
+  
+  #RMSLE = sqrt ( sum (ln(p_i+1) - ln(y_i+1))^2 /n )
+  numerator <- (log(p+1)-log(y+1))^2
+  numerator <- colSums(numerator)
+  RMSLE <- sqrt(numerator/length(y))
+
+  #MAPE = sum a / n
+  MAPE <- colSums(abserrorpercent)/length(y)
+  
+  #MEAPE = median(a)
+  MEAPE = aaply(abserrorpercent, .margins=2, .fun=median)
+  
+  #MRAE = median ( e_i / b_i)
+  MRAE = aaply((abserror/baseline), .margins=2, .fun=median)
+  length(MRAE)
+  #return matrix where  column corresponds with a fit stat, and each row a model
+  returnmatrix <- cbind(RMSE, MAD, RMSLE, MAPE, MEAPE,MRAE)
+  dim(returnmatrix)
+  return(returnmatrix)
+}
+
+#Naive model, incumbent voteshare is 50%, or 0.5
+r <- rep(0.5, length(m1pred))
+# Y from definitions
+y <- testdata$voteshare
+# Matrix of predictions
+p <- as.matrix(cbind(m1pred,m2pred,m3pred))
+dim(p) #columns are models and rows are predicted observations
